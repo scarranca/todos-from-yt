@@ -1,4 +1,3 @@
-const RE_YOUTUBE = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/i;
 const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 export async function extractTranscript(videoId) {
@@ -17,32 +16,28 @@ export async function extractTranscript(videoId) {
 
     const videoPageHtml = await videoPageResponse.text();
 
-    // Extract captions data from the page
-    const captionsMatch = videoPageHtml.match(/"captions":\s*(\{[^}]+?"captionTracks":\s*\[[^\]]+\][^}]*\})/);
+    // Find caption track URL - try multiple patterns
+    let captionUrl = null;
 
-    if (!captionsMatch) {
-      // Try alternative pattern for playerCaptionsTracklistRenderer
-      const altMatch = videoPageHtml.match(/"playerCaptionsTracklistRenderer":\s*(\{.*?"captionTracks":\s*\[.*?\])/s);
-      if (!altMatch) {
-        throw new Error('No captions available for this video');
+    // Pattern 1: Look for baseUrl in captionTracks
+    const captionUrlMatch = videoPageHtml.match(/"captionTracks":\s*\[\s*\{[^}]*"baseUrl":\s*"([^"]+)"/);
+    if (captionUrlMatch) {
+      captionUrl = captionUrlMatch[1].replace(/\\u0026/g, '&');
+    }
+
+    // Pattern 2: Look for timedtext URL directly
+    if (!captionUrl) {
+      const timedTextMatch = videoPageHtml.match(/https:\/\/www\.youtube\.com\/api\/timedtext[^"]+/);
+      if (timedTextMatch) {
+        captionUrl = timedTextMatch[0].replace(/\\u0026/g, '&');
       }
     }
 
-    // Find caption track URL
-    const captionUrlMatch = videoPageHtml.match(/"captionTracks":\s*\[\s*\{[^}]*"baseUrl":\s*"([^"]+)"/);
-
-    if (!captionUrlMatch) {
-      throw new Error('Could not find caption track URL');
+    if (!captionUrl) {
+      throw new Error('No captions available for this video');
     }
 
-    let captionUrl = captionUrlMatch[1].replace(/\\u0026/g, '&');
-
-    // Request XML format for easier parsing
-    if (!captionUrl.includes('fmt=')) {
-      captionUrl += '&fmt=json3';
-    }
-
-    // Fetch the captions
+    // Fetch as XML (default format, more reliable)
     const captionsResponse = await fetch(captionUrl, {
       headers: {
         'User-Agent': USER_AGENT,
@@ -53,27 +48,34 @@ export async function extractTranscript(videoId) {
       throw new Error(`Failed to fetch captions: ${captionsResponse.status}`);
     }
 
-    const captionsData = await captionsResponse.json();
+    const captionsXml = await captionsResponse.text();
 
-    if (!captionsData.events || captionsData.events.length === 0) {
-      throw new Error('Caption data is empty');
-    }
-
-    // Extract text from caption events
+    // Parse XML - extract text content from <text> tags
+    const textMatches = captionsXml.matchAll(/<text[^>]*>([^<]*)<\/text>/g);
     const transcriptParts = [];
 
-    for (const event of captionsData.events) {
-      if (event.segs) {
-        for (const seg of event.segs) {
-          if (seg.utf8) {
-            transcriptParts.push(seg.utf8);
-          }
-        }
+    for (const match of textMatches) {
+      let text = match[1];
+      // Decode HTML entities
+      text = text
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&apos;/g, "'");
+
+      if (text.trim()) {
+        transcriptParts.push(text);
       }
     }
 
+    if (transcriptParts.length === 0) {
+      throw new Error('Could not parse transcript data');
+    }
+
     const fullTranscript = transcriptParts
-      .join('')
+      .join(' ')
       .replace(/\n/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
