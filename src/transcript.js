@@ -111,15 +111,30 @@ async function tryYouTubePageExtraction(videoId) {
 
   const captionData = await captionResponse.text();
   console.log('Caption data length:', captionData.length);
-  console.log('Caption data preview:', captionData.substring(0, 150));
+  console.log('=== FULL CAPTION DATA START ===');
+  console.log(captionData.substring(0, 2000));
+  console.log('=== FULL CAPTION DATA END ===');
 
   // Try parsing as XML first
   let transcript = parseTimedTextXml(captionData);
-  if (transcript) return transcript;
+  if (transcript) {
+    console.log('Parsed as XML successfully');
+    return transcript;
+  }
 
   // Try parsing as JSON3
   transcript = parseJson3Format(captionData);
-  if (transcript) return transcript;
+  if (transcript) {
+    console.log('Parsed as JSON3 successfully');
+    return transcript;
+  }
+
+  // Try srv3 format (YouTube's newer format)
+  transcript = parseSrv3Format(captionData);
+  if (transcript) {
+    console.log('Parsed as srv3 successfully');
+    return transcript;
+  }
 
   throw new Error('Could not parse caption data');
 }
@@ -169,4 +184,58 @@ function parseJson3Format(data) {
   } catch {
     return null;
   }
+}
+
+function parseSrv3Format(data) {
+  // srv3 format uses <p> tags with <s> segments
+  const parts = [];
+
+  // Try matching <p> tags with nested content
+  const pMatches = data.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/g);
+  for (const match of pMatches) {
+    const content = match[1];
+    // Extract text from <s> tags or direct content
+    const sMatches = content.matchAll(/<s[^>]*>([^<]*)<\/s>/g);
+    let hasS = false;
+    for (const sMatch of sMatches) {
+      hasS = true;
+      if (sMatch[1]?.trim()) {
+        parts.push(decodeEntities(sMatch[1].trim()));
+      }
+    }
+    // If no <s> tags, use the content directly
+    if (!hasS && content.trim()) {
+      // Remove any remaining tags
+      const cleanText = content.replace(/<[^>]+>/g, '').trim();
+      if (cleanText) {
+        parts.push(decodeEntities(cleanText));
+      }
+    }
+  }
+
+  // Also try body > p structure
+  if (parts.length === 0) {
+    const bodyMatch = data.match(/<body[^>]*>([\s\S]*?)<\/body>/);
+    if (bodyMatch) {
+      const bodyContent = bodyMatch[1];
+      const textContent = bodyContent.replace(/<[^>]+>/g, ' ').trim();
+      if (textContent) {
+        parts.push(decodeEntities(textContent));
+      }
+    }
+  }
+
+  if (parts.length === 0) return null;
+  return parts.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+function decodeEntities(text) {
+  return text
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(code));
 }
