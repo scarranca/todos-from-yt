@@ -1,0 +1,22 @@
+{
+  "name": "todos-from-yt",
+  "version": "1.0.0",
+  "description": "API server that extracts YouTube video transcripts and generates actionable todos using AI",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "youtube-transcript": "^1.2.1",
+    "@anthropic-ai/sdk": "^0.30.0",
+    "openai": "^4.67.0",
+    "@google/generative-ai": "^0.21.0",
+    "dotenv": "^16.4.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
