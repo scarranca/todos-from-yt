@@ -1,36 +1,56 @@
-import { YoutubeTranscript } from 'youtube-transcript';
+import { Innertube } from 'youtubei.js';
+
+let innertube = null;
+
+async function getClient() {
+  if (!innertube) {
+    innertube = await Innertube.create();
+  }
+  return innertube;
+}
 
 export async function extractTranscript(videoId) {
   try {
-    const transcriptItems = await YoutubeTranscript.fetchTranscript(videoId);
+    const client = await getClient();
+    const info = await client.getInfo(videoId);
 
-    if (!transcriptItems || transcriptItems.length === 0) {
-      throw new Error('No transcript available for this video. The video may not have captions enabled.');
+    const transcriptInfo = await info.getTranscript();
+
+    if (!transcriptInfo || !transcriptInfo.transcript || !transcriptInfo.transcript.content) {
+      throw new Error('No transcript available for this video');
     }
 
-    // Combine all transcript segments into a single text
-    const fullTranscript = transcriptItems
-      .map(item => item.text)
+    const segments = transcriptInfo.transcript.content.body.initial_segments;
+
+    if (!segments || segments.length === 0) {
+      throw new Error('Transcript is empty');
+    }
+
+    // Extract text from each segment
+    const fullTranscript = segments
+      .map(segment => {
+        if (segment.snippet && segment.snippet.text) {
+          return segment.snippet.text;
+        }
+        return '';
+      })
+      .filter(text => text.length > 0)
       .join(' ')
       .replace(/\s+/g, ' ')
       .trim();
 
     if (!fullTranscript) {
-      throw new Error('Transcript is empty');
+      throw new Error('Could not extract text from transcript');
     }
 
     return fullTranscript;
   } catch (error) {
     console.error('Transcript extraction error:', error);
 
-    // Provide more specific error messages
-    if (error.message.includes('Transcript is disabled')) {
-      throw new Error('Transcripts are disabled for this video');
+    if (error.message.includes('No transcript')) {
+      throw new Error('No transcript/captions available for this video');
     }
-    if (error.message.includes('No transcript available')) {
-      throw new Error(error.message);
-    }
-    if (error.message.includes('Video unavailable')) {
+    if (error.message.includes('private') || error.message.includes('unavailable')) {
       throw new Error('Video is unavailable or private');
     }
 
