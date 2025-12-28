@@ -37,8 +37,17 @@ export async function extractTranscript(videoId) {
       throw new Error('No captions available for this video');
     }
 
-    // Fetch as XML (default format, more reliable)
-    const captionsResponse = await fetch(captionUrl, {
+    console.log('Caption URL found:', captionUrl.substring(0, 100) + '...');
+
+    // Try JSON3 format first
+    let jsonUrl = captionUrl;
+    if (captionUrl.includes('fmt=')) {
+      jsonUrl = captionUrl.replace(/fmt=[^&]+/, 'fmt=json3');
+    } else {
+      jsonUrl = captionUrl + '&fmt=json3';
+    }
+
+    const captionsResponse = await fetch(jsonUrl, {
       headers: {
         'User-Agent': USER_AGENT,
       }
@@ -48,31 +57,64 @@ export async function extractTranscript(videoId) {
       throw new Error(`Failed to fetch captions: ${captionsResponse.status}`);
     }
 
-    const captionsXml = await captionsResponse.text();
+    const captionsText = await captionsResponse.text();
+    console.log('Caption response length:', captionsText.length);
+    console.log('Caption response preview:', captionsText.substring(0, 200));
 
-    // Parse XML - extract text content from <text> tags
-    const textMatches = captionsXml.matchAll(/<text[^>]*>([^<]*)<\/text>/g);
-    const transcriptParts = [];
+    // Try to parse as JSON3 format
+    let transcriptParts = [];
 
-    for (const match of textMatches) {
-      let text = match[1];
-      // Decode HTML entities
-      text = text
-        .replace(/&amp;/g, '&')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'")
-        .replace(/&apos;/g, "'");
+    try {
+      const captionsData = JSON.parse(captionsText);
 
-      if (text.trim()) {
-        transcriptParts.push(text);
+      if (captionsData.events) {
+        for (const event of captionsData.events) {
+          if (event.segs) {
+            for (const seg of event.segs) {
+              if (seg.utf8 && seg.utf8.trim()) {
+                transcriptParts.push(seg.utf8);
+              }
+            }
+          }
+        }
+      }
+    } catch (jsonError) {
+      console.log('JSON parse failed, trying XML...');
+
+      // Fallback: try XML format
+      const xmlResponse = await fetch(captionUrl, {
+        headers: {
+          'User-Agent': USER_AGENT,
+        }
+      });
+      const xmlText = await xmlResponse.text();
+      console.log('XML response preview:', xmlText.substring(0, 200));
+
+      // Parse XML - extract text content from <text> tags
+      const textMatches = xmlText.matchAll(/<text[^>]*>([^<]*)<\/text>/g);
+
+      for (const match of textMatches) {
+        let text = match[1];
+        // Decode HTML entities
+        text = text
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'")
+          .replace(/&apos;/g, "'");
+
+        if (text.trim()) {
+          transcriptParts.push(text);
+        }
       }
     }
 
     if (transcriptParts.length === 0) {
       throw new Error('Could not parse transcript data');
     }
+
+    console.log('Found', transcriptParts.length, 'transcript segments');
 
     const fullTranscript = transcriptParts
       .join(' ')
