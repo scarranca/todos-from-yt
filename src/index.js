@@ -33,9 +33,6 @@ app.post('/api/analyze', authMiddleware, async (req, res) => {
 
     // Get transcript
     const transcript = await extractTranscript(videoId);
-    if (!transcript) {
-      return res.status(404).json({ error: 'Could not extract transcript from video' });
-    }
 
     // Generate todos using AI
     const todos = await generateTodos(transcript, customPrompt);
@@ -70,9 +67,6 @@ app.post('/api/transcript', authMiddleware, async (req, res) => {
     }
 
     const transcript = await extractTranscript(videoId);
-    if (!transcript) {
-      return res.status(404).json({ error: 'Could not extract transcript from video' });
-    }
 
     res.json({
       success: true,
